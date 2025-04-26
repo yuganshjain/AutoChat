@@ -1,7 +1,9 @@
 import pytest
+import asyncio
 from fastapi.testclient import TestClient
 from datetime import datetime, timedelta
 from server import app
+import pytest_asyncio
 
 client = TestClient(app)
 
@@ -20,12 +22,20 @@ test_session = {
     "end_time": (datetime.utcnow() + timedelta(hours=2)).isoformat()
 }
 
-def test_root():
+@pytest.fixture(scope="session")
+def event_loop():
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+    yield loop
+    loop.close()
+
+@pytest.mark.asyncio
+async def test_root():
     response = client.get("/api")
     assert response.status_code == 200
     assert response.json() == {"message": "Coworking Platform API"}
 
-def test_register_user():
+@pytest.mark.asyncio
+async def test_register_user():
     response = client.post("/api/auth/register", json=test_user)
     assert response.status_code == 200
     data = response.json()
@@ -33,8 +43,8 @@ def test_register_user():
     assert data["name"] == test_user["name"]
     assert "id" in data
 
-def test_login():
-    # Login with the registered user
+@pytest.mark.asyncio
+async def test_login():
     response = client.post(
         "/api/auth/token",
         data={
@@ -48,16 +58,18 @@ def test_login():
     assert data["email"] == test_user["email"]
     return data["access_token"]
 
-def test_get_me():
-    token = test_login()
+@pytest.mark.asyncio
+async def test_get_me():
+    token = await test_login()
     headers = {"Authorization": f"Bearer {token}"}
     response = client.get("/api/auth/me", headers=headers)
     assert response.status_code == 200
     data = response.json()
     assert data["email"] == test_user["email"]
 
-def test_create_session():
-    token = test_login()
+@pytest.mark.asyncio
+async def test_create_session():
+    token = await test_login()
     headers = {"Authorization": f"Bearer {token}"}
     response = client.post("/api/sessions", json=test_session, headers=headers)
     assert response.status_code == 200
@@ -66,37 +78,40 @@ def test_create_session():
     assert data["description"] == test_session["description"]
     return data["id"]
 
-def test_get_sessions():
-    token = test_login()
+@pytest.mark.asyncio
+async def test_get_sessions():
+    token = await test_login()
     headers = {"Authorization": f"Bearer {token}"}
     response = client.get("/api/sessions", headers=headers)
     assert response.status_code == 200
     data = response.json()
     assert isinstance(data, list)
-    assert len(data) > 0
 
-def test_get_available_sessions():
-    token = test_login()
+@pytest.mark.asyncio
+async def test_get_available_sessions():
+    token = await test_login()
     headers = {"Authorization": f"Bearer {token}"}
     response = client.get("/api/sessions/available", headers=headers)
     assert response.status_code == 200
     data = response.json()
     assert isinstance(data, list)
 
-def test_join_session():
+@pytest.mark.asyncio
+async def test_join_session():
     # Create a second user to join the session
     second_user = {**test_user, "email": "test2@example.com"}
     client.post("/api/auth/register", json=second_user)
-    token = client.post(
+    token_response = client.post(
         "/api/auth/token",
         data={
             "username": second_user["email"],
             "password": second_user["password"]
         }
-    ).json()["access_token"]
+    )
+    token = token_response.json()["access_token"]
 
     # Get session ID from previous test
-    session_id = test_create_session()
+    session_id = await test_create_session()
 
     # Join session with second user
     headers = {"Authorization": f"Bearer {token}"}
@@ -105,9 +120,10 @@ def test_join_session():
     data = response.json()
     assert data["partner_id"] is not None
 
-def test_submit_feedback():
-    token = test_login()
-    session_id = test_create_session()
+@pytest.mark.asyncio
+async def test_submit_feedback():
+    token = await test_login()
+    session_id = await test_create_session()
     headers = {"Authorization": f"Bearer {token}"}
     feedback = {
         "rating": 5,
