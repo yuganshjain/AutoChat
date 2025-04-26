@@ -332,16 +332,33 @@ async def join_session(
 async def get_available_sessions(
     current_user: UserInDB = Depends(get_current_user)
 ):
-    # Find sessions that don't have a partner and aren't hosted by the current user
-    # and are scheduled in the future
-    available_sessions = await db.sessions.find({
-        "partner_id": None,
-        "host_id": {"$ne": current_user.id},
-        "start_time": {"$gt": datetime.utcnow()},
-        "status": SessionStatus.SCHEDULED
-    }).to_list(50)
-    
-    return [Session(**session) for session in available_sessions]
+    try:
+        # Find sessions that don't have a partner and aren't hosted by the current user
+        # and are scheduled in the future
+        available_sessions = await db.sessions.find({
+            "partner_id": None,
+            "host_id": {"$ne": current_user.id},
+            "start_time": {"$gt": datetime.utcnow()},
+            "status": SessionStatus.SCHEDULED
+        }).to_list(50)
+        
+        # Convert datetime objects to strings to make them JSON serializable
+        sessions = []
+        for session in available_sessions:
+            # Handle potential missing fields
+            if "start_time" in session and isinstance(session["start_time"], datetime):
+                session["start_time"] = session["start_time"].isoformat()
+            if "end_time" in session and isinstance(session["end_time"], datetime):
+                session["end_time"] = session["end_time"].isoformat()
+            if "created_at" in session and isinstance(session["created_at"], datetime):
+                session["created_at"] = session["created_at"].isoformat()
+                
+            sessions.append(Session(**session))
+        
+        return sessions
+    except Exception as e:
+        logger.error(f"Error getting available sessions: {str(e)}")
+        return []
 
 @api_router.post("/sessions/{session_id}/feedback", response_model=Session)
 async def submit_feedback(
